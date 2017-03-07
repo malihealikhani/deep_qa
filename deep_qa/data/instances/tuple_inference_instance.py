@@ -22,11 +22,11 @@ class TextTuple:
 
     def display_string(self):
         # NOTE: not currently displaying location, time, and source info.
-        return ("TextTuple( [\n\tsubj: {0} \n\tverb: {1} \n\tobjects: {2} " +
-                "\n\tcontext: {3}\n] )").format(self.subject,
-                                                self.verb,
-                                                ", ".join(self.objects),
-                                                self.context)
+        return ("\tTextTuple( [\n\t\tsubj: {0} \n\t\tverb: {1} \n\t\tobjects: {2} " +
+                "\n\t\tcontext: {3}\n] )").format(self.subject,
+                                                  self.verb,
+                                                  ", ".join(self.objects),
+                                                  self.context)
 
     def to_text_list(self, object_handling: str="collapse", include_context: bool=True):
         '''
@@ -137,12 +137,12 @@ class TupleInferenceInstance(TextInstance):
 
     def display_string(self):
         to_return = 'MultipleTrueFalseTuplesWithBackgroundInstance: \n'
-        to_return += "  Answer Candidates: \n"
+        to_return += "Answer Candidates: \n"
         for answer_index in range(len(self.answer_tuples)):
             string_answer_tuples = [a_tuple.display_string() for a_tuple in self.answer_tuples[answer_index]]
-            to_return += "\t [{0}] {1}\n".format(answer_index, ", \n".join(string_answer_tuples))
-        to_return += "\n  Background Tuples: \n " + \
-                     ", \n".join([background.display_string() for background in self.background_tuples])
+            to_return += "Answer Option [{0}]:\n{1}\n".format(answer_index, ",\n".join(string_answer_tuples))
+        to_return += "\nBackground Tuples:\n" + \
+                     ",\n".join([background.display_string() for background in self.background_tuples])
         return to_return
 
     @overrides
