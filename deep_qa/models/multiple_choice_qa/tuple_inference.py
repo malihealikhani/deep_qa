@@ -2,6 +2,7 @@ from typing import Dict, Any
 
 from keras.layers import Input, Layer
 from overrides import overrides
+import numpy
 
 from deep_qa.data.instances.tuple_inference_instance import TupleInferenceInstance
 from deep_qa.layers.tuple_matchers.word_overlap_tuple_matcher import WordOverlapTupleMatcher
@@ -175,3 +176,14 @@ class TupleInferenceModel(TextTrainer):
         final_output = MaskedSoftmax()(options_probabilities)
 
         return DeepQaModel(input=[question_input, background_input], output=[final_output])
+
+    @overrides
+    def _instance_debug_output(self, instance: TupleInferenceInstance, outputs: Dict[str, numpy.array]) -> str:
+        result = ""
+        result += "Instance: %s\n" % instance.display_string()
+        result += "Label: %s\n" % instance.label
+        # TODO(pradeep): Dealing with only the output layer. Process other layers' outputs as well.
+        for layer_name in outputs:
+            if "softmax" in layer_name:
+                result += "Final scores: %s\n" % str(outputs[layer_name])
+        return result
