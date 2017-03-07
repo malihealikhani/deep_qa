@@ -139,9 +139,10 @@ class TupleInferenceInstance(TextInstance):
         to_return = 'MultipleTrueFalseTuplesWithBackgroundInstance: \n'
         to_return += "  Answer Candidates: \n"
         for answer_index in range(len(self.answer_tuples)):
-            string_answer_tuples = [str(a_tuple) for a_tuple in self.answer_tuples[answer_index]]
+            string_answer_tuples = [a_tuple.display_string() for a_tuple in self.answer_tuples[answer_index]]
             to_return += "\t [{0}] {1}\n".format(answer_index, ", \n".join(string_answer_tuples))
-        to_return += "\n  Background Tuples: \n " + ", \n".join(str(self.background_tuples))
+        to_return += "\n  Background Tuples: \n " + \
+                     ", \n".join([background.display_string() for background in self.background_tuples])
         return to_return
 
     @overrides
