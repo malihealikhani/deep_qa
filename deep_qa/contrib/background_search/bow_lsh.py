@@ -64,14 +64,23 @@ class BOWLSH:
     def save_model(self):
         if not os.path.exists(self.serialization_prefix):
             os.makedirs(self.serialization_prefix)
-        pickled_embeddings_file = "%s/embeddings.pkl" % self.serialization_prefix
-        pickled_lsh_file = "%s/lsh.pkl" % self.serialization_prefix
+        pickled_embeddings_file = open("%s/embeddings.pkl" % self.serialization_prefix, "wb")
+        pickled_lsh_file = open("%s/lsh.pkl" % self.serialization_prefix, "wb")
         indexed_background_file = open("%s/background.tsv" % self.serialization_prefix, "w")
-        pickle.dump(self.embeddings, open(pickled_embeddings_file, 'wb'))
-        pickle.dump(self.lsh, open(pickled_lsh_file, 'wb'))
+        print("\tDumping embeddings", file=sys.stderr)
+        pickle.dump(self.embeddings, pickled_embeddings_file)
+        print("\tDumping sentences", file=sys.stderr)
         for index, sentence in self.indexed_background.items():
             sentence = sentence.replace('\t', ' ')  # Sanitizing sentences before making a tsv.
             print("%d\t%s" % (index, sentence), file=indexed_background_file)
+        pickled_embeddings_file.close()
+        indexed_background_file.close()
+        # Serializing the LSH is memory intensive. Deleting the other members first.
+        del(self.embeddings)
+        del(self.indexed_background)
+        print("\tDumping LSH", file=sys.stderr)
+        pickle.dump(self.lsh, pickled_lsh_file)
+        pickled_lsh_file.close()
 
     def get_word_vector(self, word, random_for_unk=False):
         if word in self.embeddings:
@@ -145,14 +154,17 @@ def main():
         bow_lsh.read_background(args.background_corpus)
         print("Fitting LSH", file=sys.stderr)
         bow_lsh.fit_lsh()
-        print("Saving model", file=sys.stderr)
-        bow_lsh.save_model()
     if args.questions_file is not None and args.retrieved_output is not None:
         print("Attempting to retrieve", file=sys.stderr)
         if not also_train:
             print("Attempting to load fitted LSH", file=sys.stderr)
             bow_lsh.load_model()
         bow_lsh.print_neighbors(args.questions_file, args.retrieved_output)
+    if also_train:
+        # We do this after retrieval (if needed) because some members of the class are deleted before LSH
+        # is serialized to save memory.
+        print("Saving model", file=sys.stderr)
+        bow_lsh.save_model()
 
 if __name__== '__main__':
     main()
