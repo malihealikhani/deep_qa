@@ -93,10 +93,12 @@ class BOWLSH:
 
     def read_background(self, background_file):
         # Read background file and add to indexed_background.
-        for i, sentence in enumerate(gzip.open(background_file, mode="r")):
+        index = 0
+        for sentence in gzip.open(background_file, mode="r"):
             sentence = sentence.decode('utf-8').strip()
             if sentence != '':
-                self.indexed_background[i] = sentence
+                self.indexed_background[index] = sentence
+                index += 1
 
     def fit_lsh(self):
         self.lsh = LSHForest(random_state=12345)
