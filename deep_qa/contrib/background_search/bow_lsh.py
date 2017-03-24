@@ -120,7 +120,7 @@ class BowLsh:
                                            True) for i in range(len(self.indexed_background))]
         self.lsh.fit(train_data)
 
-    def print_neighbors(self, sentences_file, outfile, num_neighbors=50, sentence_queries=False):
+    def print_neighbors(self, sentences_file, outfile, num_neighbors=50, sentence_queries=False, num_options=4):
         sentences = []
         indices = []
         for line in open(sentences_file):
@@ -132,15 +132,13 @@ class BowLsh:
             test_data = [self.encode_sentence(sentence_parts[0]) for sentence_parts in sentences]
             _, all_neighbor_indices = self.lsh.kneighbors(test_data, n_neighbors=num_neighbors)
         else:
-            num_options = None
             test_data = []
             # Each tuple in sentences is (sentence, options, label)
             for sentence, options_string, _ in sentences:
                 options = options_string.split("###")
-                if num_options == None:
-                    num_options = len(options)
-                elif num_options != len(options):
-                    raise RuntimeError("Inconsistent number of options!")
+                if len(options) < num_options:
+                    options = options + [''] * (num_options - len(options))
+                options = options[:num_options]
                 test_data.append(self.encode_sentence(sentence))
                 for option in options:
                     test_data.append(self.encode_sentence("%s %s" % (sentence, option)))
@@ -182,6 +180,8 @@ def main():
     argparser.add_argument("--sentence_queries", help="If this flag is given, queries will be treated as sentences.\
                            If not, they will be treated as question-answer pairs, and the LSH will get one query\
                            per question, and one each per answer option.", action='store_true')
+    argparser.add_argument("--num_options", type=int, help="Number of options for multiple choice questions",
+                           default=4)
     args = argparser.parse_args()
     bow_lsh = BowLsh(args.serialization_prefix)
     also_train = False
@@ -199,7 +199,7 @@ def main():
         if not also_train:
             print("Attempting to load fitted LSH", file=sys.stderr)
             bow_lsh.load_model()
-        bow_lsh.print_neighbors(args.questions_file, args.retrieved_output, args.sentence_queries)
+        bow_lsh.print_neighbors(args.questions_file, args.retrieved_output, args.sentence_queries, args.num_options)
     if also_train:
         # We do this after retrieval (if needed) because some members of the class are deleted before LSH
         # is serialized to save memory.
