@@ -1,20 +1,19 @@
 '''
-The retrieval method encodes both the background and the query sentences by averaging their, and does retrieval using
-a Locality Sensitive Hash (LSH). We use ScikitLearn's LSH.
+The retrieval method encodes both the background and the query sentences by averaging their word representations,
+and does retrieval using a Locality Sensitive Hash (LSH). We use ScikitLearn's LSH.
 '''
 import sys
 import os
 import argparse
 import gzip
-import numpy
-import sklearn
 import pickle
+import numpy
 
 import spacy
 from sklearn.neighbors import LSHForest
 
 
-class BOWLSH:
+class BowLsh:
     def __init__(self, serialization_prefix='lsh'):
         self.embeddings = {}
         self.lsh = None
@@ -55,13 +54,18 @@ class BOWLSH:
                 if vector_min < self.vector_min:
                     self.vector_min = vector_min
                 if vector_max > self.vector_max:
-                    self.vector_max = vector_max 
+                    self.vector_max = vector_max
         self.lsh = pickle.load(open(pickled_lsh_file, 'rb'))
         for line in indexed_background_file:
             parts = line.strip().split('\t')
             self.indexed_background[int(parts[0])] = parts[1]
 
     def save_model(self):
+        '''
+        We serialize the embedding, indexed background and the LSH here. Note that we delete the embedding and the
+        indexed background before serializing the LSH to save memory, and thus those members are unusable after
+        calling this method.
+        '''
         if not os.path.exists(self.serialization_prefix):
             os.makedirs(self.serialization_prefix)
         pickled_embeddings_file = open("%s/embeddings.pkl" % self.serialization_prefix, "wb")
@@ -76,8 +80,8 @@ class BOWLSH:
         pickled_embeddings_file.close()
         indexed_background_file.close()
         # Serializing the LSH is memory intensive. Deleting the other members first.
-        del(self.embeddings)
-        del(self.indexed_background)
+        del self.embeddings
+        del self.indexed_background
         print("\tDumping LSH", file=sys.stderr)
         pickle.dump(self.lsh, pickled_lsh_file)
         pickled_lsh_file.close()
@@ -90,7 +94,8 @@ class BOWLSH:
             # from the range (vector_min, vector_max)). If this is for the queries, we'll return a zero vector
             # for UNK because this word doesn't exist in the background data either.
             if random_for_unk:
-                vector = numpy.random.uniform(low=self.vector_min, high=self.vector_max, size=(self.embedding_dim,))
+                vector = numpy.random.uniform(low=self.vector_min, high=self.vector_max,
+                                              size=(self.embedding_dim,))
                 self.embeddings[word] = vector
             else:
                 vector = numpy.zeros((self.embedding_dim,))
@@ -115,15 +120,47 @@ class BOWLSH:
                                            True) for i in range(len(self.indexed_background))]
         self.lsh.fit(train_data)
 
-    def print_neighbors(self, sentences_file, outfile, num_neighbors=50):
+    def print_neighbors(self, sentences_file, outfile, num_neighbors=50, sentence_queries=False):
         sentences = []
         indices = []
         for line in open(sentences_file):
             parts = line.strip().split('\t')
             indices.append(parts[0])
-            sentences.append(parts[1])
-        test_data = [self.encode_sentence(sentence) for sentence in sentences]
-        _, all_neighbor_indices = self.lsh.kneighbors(test_data, n_neighbors=num_neighbors)
+            sentences.append(parts[1:])
+        if sentence_queries:
+            # Each tuple in sentences is (sentence, label)
+            test_data = [self.encode_sentence(sentence_parts[0]) for sentence_parts in sentences]
+            _, all_neighbor_indices = self.lsh.kneighbors(test_data, n_neighbors=num_neighbors)
+        else:
+            num_options = None
+            test_data = []
+            # Each tuple in sentences is (sentence, options, label)
+            for sentence, options_string, _ in sentences:
+                options = options_string.split("###")
+                if num_options == None:
+                    num_options = len(options)
+                elif num_options != len(options):
+                    raise RuntimeError("Inconsistent number of options!")
+                test_data.append(self.encode_sentence(sentence))
+                for option in options:
+                    test_data.append(self.encode_sentence("%s %s" % (sentence, option)))
+            num_queries_per_question = 1 + num_options
+            num_neighbors_per_query = num_neighbors // num_queries_per_question
+            similarity_scores, query_neighbor_indices = self.lsh.kneighbors(test_data,
+                                                                            n_neighbors=num_neighbors_per_query)
+            # We need to do some post-processing here to sort the results from all the queries.
+            # Note that we are comparing the similarity scores from different queries here. This is not a correct
+            # comparison, but we just want to push the not-so-relevant results towards the end so that they can
+            # later be pruned if needed.
+            num_questions = len(sentences)
+            # This may be different from num_neighbors if it is not a multiple of num_queries_per_question
+            actual_num_neighbors = num_queries_per_question * num_neighbors_per_query
+            similarity_scores_per_question = numpy.reshape(similarity_scores,
+                                                           (num_questions, actual_num_neighbors))
+            all_neighbor_indices = numpy.reshape(query_neighbor_indices, (num_questions, actual_num_neighbors))
+            # Actually sorting the indices with similarity scores as keys.
+            all_neighbor_indices = [t[1] for t in sorted(zip(similarity_scores_per_question,
+                                                             all_neighbor_indices))]
         with open(outfile, "w") as outfile:
             for i, sentence_neighbor_indices in zip(indices, all_neighbor_indices):
                 print("%s\t%s" % (i, "\t".join([self.indexed_background[j] for j in sentence_neighbor_indices])),
@@ -138,12 +175,15 @@ def main():
     argparser.add_argument("--background_corpus", type=str, help="Gzipped sentences file (required for fitting)")
     argparser.add_argument("--questions_file", type=str, help="TSV file with indices in the first column \
                            and question in the second (required for retrieval)")
-    argparser.add_argument("--retrieved_output", type=str, help="Location where retrieved sentences will be written \
-                           (required for retrieval)")
+    argparser.add_argument("--retrieved_output", type=str, help="Location where retrieved sentences will be \
+                           written (required for retrieval)")
     argparser.add_argument("--serialization_prefix", type=str, help="Loacation where the lsh will be serialized \
                            (default: lsh/)", default="lsh")
+    argparser.add_argument("--sentence_queries", help="If this flag is given, queries will be treated as sentences.\
+                           If not, they will be treated as question-answer pairs, and the LSH will get one query\
+                           per question, and one each per answer option.", action='store_true')
     args = argparser.parse_args()
-    bow_lsh = BOWLSH(args.serialization_prefix)
+    bow_lsh = BowLsh(args.serialization_prefix)
     also_train = False
     if args.embeddings_file is not None and args.background_corpus is not None:
         print("Attempting to fit LSH", file=sys.stderr)
@@ -159,12 +199,12 @@ def main():
         if not also_train:
             print("Attempting to load fitted LSH", file=sys.stderr)
             bow_lsh.load_model()
-        bow_lsh.print_neighbors(args.questions_file, args.retrieved_output)
+        bow_lsh.print_neighbors(args.questions_file, args.retrieved_output, args.sentence_queries)
     if also_train:
         # We do this after retrieval (if needed) because some members of the class are deleted before LSH
         # is serialized to save memory.
         print("Saving model", file=sys.stderr)
         bow_lsh.save_model()
 
-if __name__== '__main__':
+if __name__ == '__main__':
     main()
