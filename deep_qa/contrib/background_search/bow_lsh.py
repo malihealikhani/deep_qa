@@ -143,22 +143,33 @@ class BowLsh:
                 for option in options:
                     test_data.append(self.encode_sentence("%s %s" % (sentence, option)))
             num_queries_per_question = 1 + num_options
-            num_neighbors_per_query = num_neighbors // num_queries_per_question
+            #num_neighbors_per_query = num_neighbors // num_queries_per_question
             similarity_scores, query_neighbor_indices = self.lsh.kneighbors(test_data,
-                                                                            n_neighbors=num_neighbors_per_query)
+                                                                            n_neighbors=num_neighbors)
             # We need to do some post-processing here to sort the results from all the queries.
             # Note that we are comparing the similarity scores from different queries here. This is not a correct
             # comparison, but we just want to push the not-so-relevant results towards the end so that they can
             # later be pruned if needed.
             num_questions = len(sentences)
-            # This may be different from num_neighbors if it is not a multiple of num_queries_per_question
-            actual_num_neighbors = num_queries_per_question * num_neighbors_per_query
+            actual_num_neighbors = num_queries_per_question * num_neighbors
             similarity_scores_per_question = numpy.reshape(similarity_scores,
                                                            (num_questions, actual_num_neighbors))
-            all_neighbor_indices = numpy.reshape(query_neighbor_indices, (num_questions, actual_num_neighbors))
-            # Actually sorting the indices with similarity scores as keys.
-            all_neighbor_indices = [t[1] for t in sorted(zip(similarity_scores_per_question,
-                                                             all_neighbor_indices))]
+            all_query_neighbor_indices = numpy.reshape(query_neighbor_indices,
+                                                       (num_questions, actual_num_neighbors))
+            all_neighbor_indices = []
+            for neighbor_indices, similarity_scores in zip(all_query_neighbor_indices,
+                                                           similarity_scores_per_question):
+                # Sorting by similarity scores
+                neighbor_indices = [t[1] for t in sorted(zip(similarity_scores, neighbor_indices))]
+                filtered_neighbor_indices = []
+                seen_neighbors = set([])
+                for index in neighbor_indices:
+                    if len(filtered_neighbor_indices) >= num_neighbors:
+                        break
+                    if index not in seen_neighbors:
+                        filtered_neighbor_indices.append(index)
+                        seen_neighbors.add(index)
+                all_neighbor_indices.append(filtered_neighbor_indices)
         with open(outfile, "w") as outfile:
             for i, sentence_neighbor_indices in zip(indices, all_neighbor_indices):
                 print("%s\t%s" % (i, "\t".join([self.indexed_background[j] for j in sentence_neighbor_indices])),
@@ -177,9 +188,12 @@ def main():
                            written (required for retrieval)")
     argparser.add_argument("--serialization_prefix", type=str, help="Loacation where the lsh will be serialized \
                            (default: lsh/)", default="lsh")
-    argparser.add_argument("--sentence_queries", help="If this flag is given, queries will be treated as sentences.\
-                           If not, they will be treated as question-answer pairs, and the LSH will get one query\
-                           per question, and one each per answer option.", action='store_true')
+    argparser.add_argument("--sentence_queries", help="If this flag is given, queries will be treated\
+                           as sentences. If not, they will be treated as question-answer pairs, and the\
+                           LSH will get one query per question, and one each per answer option.",
+                           action='store_true')
+    argparser.add_argument("--num_neighbors", type=int, help="Number of background sentences to retrieve",
+                           default=50)
     argparser.add_argument("--num_options", type=int, help="Number of options for multiple choice questions",
                            default=4)
     args = argparser.parse_args()
@@ -199,7 +213,8 @@ def main():
         if not also_train:
             print("Attempting to load fitted LSH", file=sys.stderr)
             bow_lsh.load_model()
-        bow_lsh.print_neighbors(args.questions_file, args.retrieved_output, args.sentence_queries, args.num_options)
+        bow_lsh.print_neighbors(args.questions_file, args.retrieved_output, args.num_neighbors,
+                                args.sentence_queries, args.num_options)
     if also_train:
         # We do this after retrieval (if needed) because some members of the class are deleted before LSH
         # is serialized to save memory.
