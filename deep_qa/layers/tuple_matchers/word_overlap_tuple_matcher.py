@@ -1,61 +1,69 @@
 from keras import backend as K
-from keras import initializations, activations
-from keras.layers import Layer
+from keras import initializers, activations
 from overrides import overrides
 
 from ...tensors.backend import switch, apply_feed_forward
+from ..masked_layer import MaskedLayer
 
 
-class WordOverlapTupleMatcher(Layer):
+class WordOverlapTupleMatcher(MaskedLayer):
     r"""
-    This layer takes as input two tensors corresponding to two tuples, an answer tuple and a background tuple,
-    and calculates the degree to which the background tuple `entails` the answer tuple.  Entailment is
-    determined by generating a set of entailment features from the tuples (the number of
-    entailment_features = number of tuple slots), and then passing these features into a shallow NN to get an
-    entailment score.
-    Each entailment feature is currently made by comparing the corresponding slots in the two tuples and
-    determining the degree of lexical overlap using the formula:
-        :math:`normalized overlap_s = \dfrac{|A_s \cap B_s|}{|A_s|}`
-    where :math:`s` is the index of the slot, :math:`A_s` is answer tuple slot :math:`s` and :math:`B_s` is
-    background tuple slot :math:`s`.
+    This layer takes as input two tensors corresponding to two tuples, an answer tuple and a
+    background tuple, and calculates the degree to which the background tuple `entails` the answer
+    tuple.
+
+    Entailment is determined by generating a set of entailment features from the tuples (the number
+    of entailment_features = number of tuple slots), and then passing these features into a shallow
+    NN to get an entailment score.
+
+    Each entailment feature is currently made by comparing the corresponding slots in the two
+    tuples and determining the degree of lexical overlap using the formula:
+
+    - :math:`normalized overlap_s = \dfrac{|A_s \cap B_s|}{|A_s|}`
+
+    where :math:`s` is the index of the slot, :math:`A_s` is answer tuple slot :math:`s` and
+    :math:`B_s` is background tuple slot :math:`s`.
 
     Inputs:
-        - tuple_1_input (the answer tuple), shape ``(batch size, num_slots, num_slot_words_t1)``,
-          any mask is ignored.  Here num_slot_words_t1 is the maximum number of words in each of the
-          slots in tuple_1.
-        - tuple_2_input (the background_tuple), shape ``(batch size, num_slots, num_slot_words_t2)``,
-          and again, any corresponding mask is ignored. As above, num_slot_words_t2 is the
-          maximum number of words in each of the slots in tuple_2. This need not match tuple 1.
+
+    - tuple_1_input (the answer tuple), shape ``(batch size, num_slots, num_slot_words_t1)``
+      Any mask is ignored. Here num_slot_words_t1 is the maximum number of
+      words in each of the slots in tuple_1.
+
+    - tuple_2_input (the background_tuple), shape ``(batch size, num_slots, num_slot_words_t2)``
+      Any corresponding mask is ignored. As above, num_slot_words_t2 is the
+      maximum number of words in each of the slots in tuple_2. This need not
+      match tuple 1.
 
     Output:
-        - entailment score, shape ``(batch, 1)``
+
+    - entailment score, shape ``(batch, 1)``
 
     Parameters
     ----------
-    - num_hidden_layers : int, default=1
+    num_hidden_layers : int, default=1
         Number of hidden layers in the shallow NN.
 
-    - hidden_layer_width : int, default=4
+    hidden_layer_width : int, default=4
         The number of nodes in each of the NN hidden layers.
 
-    - initialization : string, default='glorot_uniform'
+    initialization : string, default='glorot_uniform'
         The initialization of the NN weights
 
-    - hidden_layer_activation : string, default='relu'
+    hidden_layer_activation : string, default='relu'
         The activation of the NN hidden layers
 
-    - final_activation : string, default='sigmoid'
+    final_activation : string, default='sigmoid'
         The activation of the NN output layer
 
     Notes
-    -----
-    This layer is incompatible with the WordsAndCharacters tokenizer.
+    _____
+    This layer is incompatible with the ``WordsAndCharacters`` tokenizer.
     """
 
     def __init__(self, num_hidden_layers: int=1, hidden_layer_width: int=4,
                  initialization: str='glorot_uniform', hidden_layer_activation: str='tanh',
                  final_activation: str='sigmoid', **kwargs):
-        self.supports_masking = True
         # Parameters for the shallow neural network
         self.num_hidden_layers = num_hidden_layers
         self.hidden_layer_width = hidden_layer_width
@@ -83,16 +91,16 @@ class WordOverlapTupleMatcher(Layer):
         hidden_layer_input_dim = input_shape[0][1]
         for i in range(self.num_hidden_layers):
             hidden_layer = self.add_weight(shape=(hidden_layer_input_dim, self.hidden_layer_width),
-                                           initializer=initializations.get(self.hidden_layer_init),
+                                           initializer=initializers.get(self.hidden_layer_init),
                                            name='%s_hiddenlayer_%d' % (self.name, i))
             self.hidden_layer_weights.append(hidden_layer)
             hidden_layer_input_dim = self.hidden_layer_width
         # Add the weights for the final layer.
         self.score_layer = self.add_weight(shape=(self.hidden_layer_width, 1),
-                                           initializer=initializations.get(self.hidden_layer_init),
+                                           initializer=initializers.get(self.hidden_layer_init),
                                            name='%s_score' % self.name)
 
-    def get_output_shape_for(self, input_shapes):
+    def compute_output_shape(self, input_shapes):
         # pylint: disable=unused-argument
         return (input_shapes[0][0], 1)
 
@@ -103,17 +111,18 @@ class WordOverlapTupleMatcher(Layer):
         # the whole tuple_match should be masked, so we would return a 0, otherwise we return a 1.  As such,
         # the shape of the returned mask is (batch size, 1).
         input1, input2 = input
-        mask = K.any(input1, axis=[1, 2]) * K.any(input2, axis=[1, 2])
-        return K.expand_dims(mask)
+        mask = K.cast(K.any(input1, axis=[1, 2]), 'uint8') * K.cast(K.any(input2, axis=[1, 2]), 'uint8')
+        return K.cast(K.expand_dims(mask), 'bool')
 
     def get_output_mask_shape_for(self, input_shape):  # pylint: disable=no-self-use
         # input_shape is [(batch_size, num_slots, num_slot_words_t1), (batch_size, num_slots, num_slot_words_t2)]
         mask_shape = (input_shape[0][0], 1)
         return mask_shape
 
-    def call(self, x, mask=None):
-        tuple1_input, tuple2_input = x      # tuple1 shape: (batch size, num_slots, num_slot_words_t1)
-                                            # tuple2 shape: (batch size, num_slots, num_slot_words_t2)
+    @overrides
+    def call(self, inputs, mask=None):
+        tuple1_input, tuple2_input = inputs  # tuple1 shape: (batch size, num_slots, num_slot_words_t1)
+                                             # tuple2 shape: (batch size, num_slots, num_slot_words_t2)
         # Check that the tuples have the same number of slots.
         assert K.int_shape(tuple1_input)[1] == K.int_shape(tuple2_input)[1]
 

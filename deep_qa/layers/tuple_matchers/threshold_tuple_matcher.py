@@ -2,38 +2,45 @@ from copy import deepcopy
 from typing import Any, Dict
 
 from keras import backend as K
-from keras import initializations, activations
-from keras.regularizers import L1L2Regularizer
-from keras.layers import Layer
+from keras import initializers, activations
+from keras.regularizers import l1_l2
 from overrides import overrides
 
-from ...tensors.backend import switch, apply_feed_forward
 from ...common.params import get_choice_with_default
+from ...tensors.backend import switch, apply_feed_forward
 from ...tensors.similarity_functions import similarity_functions
+from ..masked_layer import MaskedLayer
 
 
-class ThresholdTupleMatcher(Layer):
+class ThresholdTupleMatcher(MaskedLayer):
     r"""
-    This layer takes as input two tensors corresponding to two tuples, an answer tuple and a background tuple,
-    and calculates the degree to which the background tuple `entails` the answer tuple.  Entailment is
-    determined by generating a set of entailment features from the tuples (the number of
-    entailment_features = number of tuple slots), and then passing these features into a shallow NN to get an
-    entailment score.
-    Each entailment feature is currently made by comparing the corresponding slots in the two tuples and
-    determining the degree of lexical overlap based on a similarity threshold, :math:`\tau` which is learned
-    by the model.
-        Let :math:`T(B_s, A_s) = \{b_s^i \in B_s : sim(b_s^i, a_s^j) > \tau` for some :math:`a_s^j \in A_s \}`,
-        where where :math:`s` is the index of the slot, :math:`A_s` is answer tuple slot :math:`s` and :math:`B_s`
-        is background tuple slot :math:`s`, and :math:`\tau` is the current similarity threshold.
+    This layer takes as input two tensors corresponding to two tuples, an answer tuple and a
+    background tuple, and calculates the degree to which the background tuple `entails` the answer
+    tuple.
 
-    That is, $T(B_s, A_s)$ is the set of words in the background slot which are similar enough to words in
-    the answer slot to "count" as overlapping.
+    Entailment is determined by generating a set of entailment features from the tuples (the number
+    of entailment_features = number of tuple slots), and then passing these features into a shallow
+    NN to get an entailment score.
+
+    Each entailment feature is currently made by comparing the corresponding slots in the two
+    tuples and determining the degree of lexical overlap based on a similarity threshold,
+    :math:`\tau` which is learned by the model.
+
+    Let :math:`T(B_s, A_s) = \{b_s^i \in B_s : sim(b_s^i, a_s^j) > \tau` for some :math:`a_s^j \in
+    A_s \}`, where where :math:`s` is the index of the slot, :math:`A_s` is answer tuple slot
+    :math:`s` and :math:`B_s` is background tuple slot :math:`s`, and :math:`\tau` is the current
+    similarity threshold.
+
+    That is, $T(B_s, A_s)$ is the set of words in the background slot which are similar enough to
+    words in the answer slot to "count" as overlapping.
     Then,
-        :math:`normalized\_overlap_s = \dfrac{|T(B_s, A_s)|}{|A_s|}`
+
+    - :math:`normalized\_overlap_s = \dfrac{|T(B_s, A_s)|}{|A_s|}`
 
     Inputs:
+
         - tuple_1_input (the answer tuple), shape ``(batch size, num_slots, num_slot_words_t1, embedding_dim)``,
-          and ac orresponding mask of shape (``(batch size, num_slots, num_slot_words_t1)``.
+          and a corresponding mask of shape (``(batch size, num_slots, num_slot_words_t1)``.
           Here num_slot_words_t1 is the maximum number of words in each of the slots in tuple_1.
         - tuple_2_input (the background_tuple),
           shape ``(batch size, num_slots, num_slot_words_t2, embedding_dim)``, and again a corresponding mask
@@ -41,28 +48,29 @@ class ThresholdTupleMatcher(Layer):
           maximum number of words in each of the slots in tuple_2. This need not match tuple 1.
 
     Output:
+
         - entailment score, shape ``(batch, 1)``
 
     Parameters
     ----------
-    - similarity_function_params: Dict[str, Any], default={}
+    similarity_function_params: Dict[str, Any], default={}
         These parameters get passed to a similarity function (see
         :mod:`deep_qa.tensors.similarity_functions` for more info on what's acceptable).  The default
         similarity function with no parameters is a simple dot product.
 
-    - num_hidden_layers : int, default=1
+    num_hidden_layers : int, default=1
         Number of hidden layers in the shallow NN.
 
-    - hidden_layer_width : int, default=4
+    hidden_layer_width : int, default=4
         The number of nodes in each of the NN hidden layers.
 
-    - initialization : string, default='glorot_uniform'
+    initialization : string, default='glorot_uniform'
         The initialization of the NN weights
 
-    - hidden_layer_activation : string, default='relu'
+    hidden_layer_activation : string, default='relu'
         The activation of the NN hidden layers
 
-    - final_activation : string, default='sigmoid'
+    final_activation : string, default='sigmoid'
         The activation of the NN output layer
 
     """
@@ -105,26 +113,26 @@ class ThresholdTupleMatcher(Layer):
     def build(self, input_shape):
         super(ThresholdTupleMatcher, self).build(input_shape)
         # Add the parameter for the similarity threshold
-        self.similarity_threshold = self.add_weight(shape=(),
+        self.similarity_threshold = self.add_weight(shape=(1,),
                                                     name=self.name + '_similarity_thresh',
                                                     initializer=self.hidden_layer_init,
-                                                    regularizer=L1L2Regularizer(l2=0.001),
+                                                    regularizer=l1_l2(l2=0.001),
                                                     trainable=True)
 
         # Add the weights for the hidden layers.
         hidden_layer_input_dim = input_shape[0][1]
         for i in range(self.num_hidden_layers):
             hidden_layer = self.add_weight(shape=(hidden_layer_input_dim, self.hidden_layer_width),
-                                           initializer=initializations.get(self.hidden_layer_init),
+                                           initializer=initializers.get(self.hidden_layer_init),
                                            name='%s_hiddenlayer_%d' % (self.name, i))
             self.hidden_layer_weights.append(hidden_layer)
             hidden_layer_input_dim = self.hidden_layer_width
         # Add the weights for the final layer.
         self.score_layer = self.add_weight(shape=(self.hidden_layer_width, 1),
-                                           initializer=initializations.get(self.hidden_layer_init),
+                                           initializer=initializers.get(self.hidden_layer_init),
                                            name='%s_score' % self.name)
 
-    def get_output_shape_for(self, input_shapes):
+    def compute_output_shape(self, input_shapes):
         # pylint: disable=unused-argument
         return (input_shapes[0][0], 1)
 
@@ -137,8 +145,8 @@ class ThresholdTupleMatcher(Layer):
             return None
         # Each of the two masks in input_mask are of shape: (batch size, num_slots, num_slot_words)
         mask1, mask2 = input_mask
-        mask = K.any(mask1, axis=[1, 2]) * K.any(mask2, axis=[1, 2])
-        return K.expand_dims(mask)
+        mask = K.cast(K.any(mask1, axis=[1, 2]), 'uint8') * K.cast(K.any(mask2, axis=[1, 2]), 'uint8')
+        return K.cast(K.expand_dims(mask), 'bool')
 
     def get_output_mask_shape_for(self, input_shape):  # pylint: disable=no-self-use
         # input_shape is [(batch_size, num_slots, num_slot_words_t1, embedding_dim),
@@ -146,9 +154,10 @@ class ThresholdTupleMatcher(Layer):
         mask_shape = (input_shape[0][0], 1)
         return mask_shape
 
-    def call(self, x, mask=None):
-        tuple1_input, tuple2_input = x    # tuple1 shape: (batch size, num_slots, num_slot_words_t1, embedding_dim)
-                                          # tuple2 shape: (batch size, num_slots, num_slot_words_t2, embedding_dim)
+    def call(self, inputs, mask=None):
+        # tuple1 shape: (batch size, num_slots, num_slot_words_t1, embedding_dim)
+        # tuple2 shape: (batch size, num_slots, num_slot_words_t2, embedding_dim)
+        tuple1_input, tuple2_input = inputs
         # Check that the tuples have the same number of slots.
         assert K.int_shape(tuple1_input)[1] == K.int_shape(tuple2_input)[1]
         num_slot_words_t1 = K.int_shape(tuple1_input)[2]
@@ -176,10 +185,16 @@ class ThresholdTupleMatcher(Layer):
         # Currently, we only consider SUBJ_t1 <--> SUBJ_t2 etc similarities, not across slot types.
         # shape: (batch size, num_slots, num_slot_words_tuple1, num_slot_words_tuple2)
         # TODO(becky): this isn't actually differentiable, is it?  fix?? don't care??
-        tuple_words_overlap = K.cast(tuple_word_similarities >= self.similarity_threshold, "float32")
+        threshold = self.similarity_threshold
+        if K.backend() == 'theano':
+            # Theano doesn't want to automatically broadcast the >=, so we'll do a tile.
+            threshold = K.tile(self.similarity_threshold, [1, 1, num_slot_words_t1, num_slot_words_t2])
+        tuple_words_overlap = K.cast(tuple_word_similarities >= threshold, "float32")
 
         # Exclude padded/masked elements from counting.
         zeros_excluded_overlap = tuple_words_overlap
+        if mask is None:
+            mask = [None, None]
         # First, tuple1:
         if mask[0] is not None:
             # Originally, masks for tuples are of shape: (batch size, num_slots, num_slot_words)

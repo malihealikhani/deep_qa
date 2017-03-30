@@ -1,11 +1,10 @@
 from typing import Any, Dict
 
-from keras.layers import Dense, Input
+from keras.layers import Dense, Input, TimeDistributed
 from overrides import overrides
 
 from ...common.params import get_choice
 from ...data.instances.sequence_tagging import concrete_instances
-from ...layers.wrappers.time_distributed import TimeDistributed
 from ...training.text_trainer import TextTrainer
 from ...training.models import DeepQaModel
 
@@ -53,5 +52,4 @@ class SimpleTagger(TextTrainer):
 
     @overrides
     def _set_max_lengths_from_model(self):
-        # TODO(matt): implement this correctly
-        pass
+        self.set_text_lengths_from_model_input(self.model.get_input_shape_at(0)[1:])

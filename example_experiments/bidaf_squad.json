@@ -12,7 +12,7 @@
         "default": {
             "type": "bi_gru",
             "encoder_params": {
-                "output_dim": 100
+                "units": 100
             },
             "wrapper_params": {}
         }
@@ -21,12 +21,13 @@
     "embedding_dropout": 0.2,
     "batch_size": 10,
     "patience": 3,
-    "embedding_size": 100,
+    "embedding_dim": {"words": 100, "characters": 8},
     "num_epochs": 20,
     "optimizer": {
       "type": "adadelta",
       "lr": 0.5
     },
-    "validation_files": ["/efs/data/dlfa/squad/processed/dev.tsv"],
-    "train_files": ["/efs/data/dlfa/squad/processed/train.tsv"]
+    "max_training_instances": 100,
+    "validation_files": ["/efs/data/dlfa/sciq_da/processed/dev.tsv"],
+    "train_files": ["/efs/data/dlfa/sciq_da/processed/train.tsv"]
 }

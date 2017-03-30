@@ -1,21 +1,23 @@
 from keras import backend as K
-from keras.layers import Layer
 from overrides import overrides
 
+from ..masked_layer import MaskedLayer
 
-class WeightedSum(Layer):
-    '''
+class WeightedSum(MaskedLayer):
+    """
     This ``Layer`` takes a matrix of vectors and a vector of row weights, and returns a weighted
     sum of the vectors.  You might use this to get some aggregate sentence representation after
     computing an attention over the sentence, for example.
 
     Inputs:
-        - matrix: ``(batch_size, num_rows, embedding_dim)``, with mask ``(batch_size, num_rows)``
-        - vector: ``(batch_size, num_rows)``, mask is ignored
 
-    Output:
-        - A weighted sum of the rows in the matrix, with shape ``(batch_size, embedding_dim)``,
-          with mask=``None``.
+    - matrix: ``(batch_size, num_rows, embedding_dim)``, with mask ``(batch_size, num_rows)``
+    - vector: ``(batch_size, num_rows)``, mask is ignored
+
+    Outputs:
+
+    - A weighted sum of the rows in the matrix, with shape ``(batch_size, embedding_dim)``, with
+      mask=``None``.
 
     Parameters
     ----------
@@ -46,12 +48,11 @@ class WeightedSum(Layer):
     (batch_size, num_documents, num_queries, num_words).  Both of these cases are fine.  In the
     first case, the returned tensor will have shape (batch_size, num_queries, embedding_dim), and
     in the second case, it will have shape (batch_size, num_documents, num_queries, embedding_dim).
-    But you _can't_ have an attention "vector" that does not include all of the queries, so shape
+    But you `can't` have an attention "vector" that does not include all of the queries, so shape
     (batch_size, num_words) is not allowed - you haven't specified how to handle that dimension in
     the "matrix", so we can't do anything with this input.
-    '''
+    """
     def __init__(self, use_masking: bool=True, **kwargs):
-        self.supports_masking = True
         self.use_masking = use_masking
         super(WeightedSum, self).__init__(**kwargs)
 
@@ -64,7 +65,7 @@ class WeightedSum(Layer):
         return None
 
     @overrides
-    def get_output_shape_for(self, input_shapes):
+    def compute_output_shape(self, input_shapes):
         matrix_shape, attention_shape = input_shapes
         return attention_shape[:-1] + matrix_shape[-1:]
 
@@ -73,12 +74,15 @@ class WeightedSum(Layer):
         matrix, attention_vector = inputs
         matrix_shape = K.int_shape(matrix)
         matrix = self._expand_matrix_if_necessary(matrix, matrix_shape[:-1], attention_vector)
-        matrix_mask = mask[0]
+        if mask is None:
+            matrix_mask = None
+        else:
+            matrix_mask = mask[0]
         if self.use_masking and matrix_mask is not None:
             matrix_mask = self._expand_matrix_if_necessary(matrix_mask, matrix_shape[:-1], attention_vector)
             # Doing a multiply here instead of a `switch` to avoid allocating another large tensor.
             matrix = K.cast(K.expand_dims(matrix_mask), 'float32') * matrix
-        return K.sum(K.expand_dims(attention_vector, dim=-1) * matrix, -2)
+        return K.sum(K.expand_dims(attention_vector, axis=-1) * matrix, -2)
 
     @staticmethod
     def _expand_matrix_if_necessary(matrix, matrix_shape, attention_vector):
@@ -98,7 +102,7 @@ class WeightedSum(Layer):
             assert attention_shape[-len(matrix_shape):] == matrix_shape, ("matrix_shape must be "
                                                                           "subset of attention_shape")
             for i in range(len(attention_shape) - len(matrix_shape)):
-                matrix = K.expand_dims(matrix, dim=i+1)  # +1 to account for batch_size
+                matrix = K.expand_dims(matrix, axis=i+1)  # +1 to account for batch_size
                 matrix = K.repeat_elements(matrix, attention_shape[i], axis=i+1)
         return matrix
 

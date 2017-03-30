@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 from overrides import overrides
 
 import numpy
-from keras.layers import Dropout, Input, Layer, merge
+from keras.layers import Dropout, Input, Layer, Concatenate
 
 from ...common.params import get_choice_with_default
 from ...data.dataset import TextDataset
@@ -26,39 +26,46 @@ from ...training.text_trainer import TextTrainer
 class MemoryNetwork(TextTrainer):
     '''
     We call this a Memory Network because it has an attention over background knowledge, or
-    "memory", similar to a memory network.  This implementation generalizes the architecture of the
+    "memory", similar to a memory network. This implementation generalizes the architecture of the
     original memory network, though, and can be used to implement several papers in the literature,
     as well as some models that we came up with.
 
     Our basic architecture is as follows:
-        Input: a sentence encoding and a set of background knowledge ("memory") encodings
 
-        current_memory = sentence_encoding
-        For each memory layer:
-           attention_weights = knowledge_selector(current_memory, background)
-           aggregated_background = weighted_sum(attention_weights, background)
-           current_memory = memory_updater(current_memory, aggregated_background)
-        final_score = entailment_model(aggregated_background, current_memory, sentence_encoding)
+    - Input: a sentence encoding and a set of background knowledge ("memory")
+      encodings
 
-    There are thus three main knobs that can be turned (in addition to the number of memory
-    layers):
-        1. the knowledge_selector
-        2. the memory_updater
-        3. the entailment_model
+    - current_memory = sentence_encoding
+
+    - For each memory layer:
+
+      - attention_weights = knowledge_selector(current_memory, background)
+      - aggregated_background = weighted_sum(attention_weights, background)
+      - current_memory = memory_updater(current_memory, aggregated_background)
+      - final_score = entailment_model(aggregated_background, current_memory, sentence_encoding)
+
+    There are thus three main knobs that can be turned (in addition to the
+    number of memory layers):
+
+        (1) the knowledge_selector
+        (2) the memory_updater
+        (3) the entailment_model
 
     The original memory networks paper used the following:
-        1. dot product (our DotProductKnowledgeSelector)
-        2. sum
-        3. linear classifier on top of current_memory
 
-    The attentive reader in "Teaching Machines to Read and Comprehend", Hermann et al., 2015, used
-    the following:
-        1. a dense layer with a dot product bias (our ParameterizedKnowledgeSelector)
-        2. Dense(K.concat([current_memory, aggregated_background]))
-        3. Dense(current_memory)
+        (1) dot product (our DotProductKnowledgeSelector)
+        (2) sum
+        (3) linear classifier on top of current_memory
+
+    The attentive reader in "Teaching Machines to Read and Comprehend", Hermann
+    et al., 2015, used the following:
+
+        (1) a dense layer with a dot product bias (our ParameterizedKnowledgeSelector)
+        (2) Dense(K.concat([current_memory, aggregated_background]))
+        (3) Dense(current_memory)
 
     Our thought is that we should treat the last step as an entailment problem - does the
-    background knowledge entail the input sentence?  Previous work was solving a different problem,
+    background knowledge entail the input sentence? Previous work was solving a different problem,
     so they used simpler models "entailment".
 
     Notes
@@ -381,10 +388,8 @@ class MemoryNetwork(TextTrainer):
 
         # Step 5: Finally, run the sentence encoding, the current memory, and the attended
         # background knowledge through an entailment model to get a final true/false score.
-        entailment_input = merge([encoded_question, current_memory, attended_knowledge],
-                                 mode='concat',
-                                 concat_axis=self._get_knowledge_axis(),
-                                 name='concat_entailment_inputs')
+        concat_layer = Concatenate(axis=self._get_knowledge_axis(), name='concat_entailment_inputs')
+        entailment_input = concat_layer([encoded_question, current_memory, attended_knowledge])
         combined_input = self._get_entailment_input_combiner()(entailment_input)
         extra_entailment_inputs, entailment_output = self._get_entailment_output(combined_input)
 
@@ -425,10 +430,9 @@ class MemoryNetwork(TextTrainer):
         # of just passing a list.
         # We going from two inputs of (batch_size, encoding_dim) to one input of (batch_size,
         # encoding_dim * 2).
-        updater_input = merge([encoded_question, current_memory, attended_knowledge],
-                              mode='concat',
-                              concat_axis=knowledge_axis,
-                              name='concat_current_memory_with_background_%d' % self.iteration)
+        concat_layer = Concatenate(axis=knowledge_axis,
+                                   name='concat_current_memory_with_background_%d' % self.iteration)
+        updater_input = concat_layer([encoded_question, current_memory, attended_knowledge])
         memory_updater = self._get_memory_updater(self.iteration)
         current_memory = memory_updater(updater_input)
         self.iteration += 1
