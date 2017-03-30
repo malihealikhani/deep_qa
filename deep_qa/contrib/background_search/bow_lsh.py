@@ -112,9 +112,9 @@ class BowLsh:
                 vector = numpy.zeros((self.embedding_dim,))
 
         if self.use_idf:
-            # Note that this line causes us to return zero vectors for words questions file that are in the
-            # embedding, but not seen in the background file when using IDF.
-            idf_value = self.idf_values[word] if word in self.idf_values else 0.0
+            # Note that this line causes us to return zero vectors for words in the questions file that are
+            # in the embedding, but not seen in the background file when using IDF.
+            idf_value = self.idf_values[word] if word in self.idf_values else self.idf_values['@UNK@']
             vector = vector * idf_value
 
         return vector
@@ -140,6 +140,7 @@ class BowLsh:
         num_docs = len(self.indexed_background)
         for word in word_doc_frequencies:
             self.idf_values[word] = numpy.log(num_docs/word_doc_frequencies[word])
+        self.idf_values['@UNK@'] = numpy.log(num_docs)  # Assuming OOV occurred in exactly 1 sentence
 
     def fit_lsh(self):
         self.lsh = LSHForest(random_state=12345)
