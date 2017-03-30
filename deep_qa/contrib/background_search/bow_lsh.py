@@ -112,8 +112,6 @@ class BowLsh:
                 vector = numpy.zeros((self.embedding_dim,))
 
         if self.use_idf:
-            # Note that this line causes us to return zero vectors for words in the questions file that are
-            # in the embedding, but not seen in the background file when using IDF.
             idf_value = self.idf_values[word] if word in self.idf_values else self.idf_values['@UNK@']
             vector = vector * idf_value
 
