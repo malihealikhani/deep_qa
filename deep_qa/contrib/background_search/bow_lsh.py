@@ -139,6 +139,14 @@ class BowLsh:
         for word in word_doc_frequencies:
             self.idf_values[word] = numpy.log(num_docs/word_doc_frequencies[word])
         self.idf_values['@UNK@'] = numpy.log(num_docs)  # Assuming OOV occurred in exactly 1 sentence
+        num_words_with_vectors = 0
+        for word in word_doc_frequencies:
+            if word in self.embeddings:
+                num_words_with_vectors += 1
+        num_total_types = len(word_doc_frequencies)
+        print("Lexical coverage of embedding: %d out of %d (%f)" % (num_words_with_vectors, num_total_types,
+                                                                    num_words_with_vectors/num_total_types),
+              file=sys.stderr)
 
     def fit_lsh(self):
         self.lsh = LSHForest(random_state=12345)
